@@ -28,11 +28,20 @@ I care most about the hard part: making AI answer *accurately* and hand off to a
 
 ### 🚀 Featured work
 
+**🧠 [Nexus](https://github.com/builtbyrishabh/nexus)** · [Live demo](https://nexus-ten-teal.vercel.app)
+An AI chatbot that answers questions from a creator's entire video catalog — grounded in *their* content, with citations that deep-link to the exact moment each claim came from. Hybrid retrieval (pgvector + full-text) fused and reranked, driven by a Mastra agent.
+
+<a href="https://github.com/builtbyrishabh/nexus"><img src="https://raw.githubusercontent.com/builtbyrishabh/nexus/main/docs/assets/issue-39/chat-citations-desktop.png" alt="Nexus answering a creator-catalog question with timestamped citations" width="100%" /></a>
+
 **🎬 [AnimeRoom](https://github.com/builtbyrishabh/AnimeRoom)**
 One prompt → a cinematic anime roast-battle video. The AI writes the script, generates every image, voices each line, and live-streams the render. LLM + image-gen + TTS + real-time rendering in one pipeline.
 
+<a href="https://github.com/builtbyrishabh/AnimeRoom"><img src="https://raw.githubusercontent.com/builtbyrishabh/AnimeRoom/main/public/website/logo-trimmed.png" alt="AnimeRoom" width="180" /></a>
+
 **🧪 [lessonplay](https://github.com/builtbyrishabh/lessonplay)**
 Give it a chemistry chapter, get a playable lab. An AI studio that writes, *validates*, and publishes playable learning games for classes 8–10 — validation baked into the generation loop.
+
+<a href="https://github.com/builtbyrishabh/lessonplay"><img src="https://raw.githubusercontent.com/builtbyrishabh/lessonplay/main/.github/assets/homepage.png" alt="LessonPlay — paste a chemistry chapter and get a playable lab" width="100%" /></a>
 
 **🧰 [mastra-sandbox](https://github.com/builtbyrishabh/mastra-sandbox)**
 Experiments with the Mastra agent framework — tools, memory, and multi-step agent workflows.
