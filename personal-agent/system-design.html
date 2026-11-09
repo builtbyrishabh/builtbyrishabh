@@ -1,0 +1,1254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Personal Agent System Design</title>
+<style>
+:root {
+  --bg: #f6f5f1; --surface: #ffffff; --surface-2: #fbfaf7; --ink: #1c1c1f; --ink-2: #4f4f57; --ink-3: #85858e;
+  --line: #e2e0d8; --code: #f1efe8;
+  --web: #2563eb; --web-soft: #e8effe;
+  --daemon: #7c3aed; --daemon-soft: #f2ecfe;
+  --loop: #c2410c; --loop-soft: #fdefe4;
+  --disk: #047857; --disk-soft: #e2f4ec;
+  --ext: #be185d; --ext-soft: #fce8f1;
+  --radius: 14px;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111113; --surface: #1a1a1e; --surface-2: #16161a; --ink: #ececf0; --ink-2: #b4b4bd; --ink-3: #7e7e88;
+    --line: #2d2d34; --code: #15151a;
+    --web: #78a6ff; --web-soft: #182339;
+    --daemon: #b197fc; --daemon-soft: #231c38;
+    --loop: #f59e5b; --loop-soft: #36220f;
+    --disk: #3fcf9a; --disk-soft: #0f2c24;
+    --ext: #f47fbb; --ext-soft: #361627;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111113; --surface: #1a1a1e; --surface-2: #16161a; --ink: #ececf0; --ink-2: #b4b4bd; --ink-3: #7e7e88;
+  --line: #2d2d34; --code: #15151a;
+  --web: #78a6ff; --web-soft: #182339;
+  --daemon: #b197fc; --daemon-soft: #231c38;
+  --loop: #f59e5b; --loop-soft: #36220f;
+  --disk: #3fcf9a; --disk-soft: #0f2c24;
+  --ext: #f47fbb; --ext-soft: #361627;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--sans); -webkit-font-smoothing: antialiased; }
+a { color: var(--web); text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1, h2, h3 { line-height: 1.2; letter-spacing: -0.015em; }
+h2 { font-size: 30px; margin: 4px 0 10px; }
+h3 { font-size: 18px; margin: 28px 0 10px; }
+p { margin: 0 0 12px; }
+code { font-family: var(--mono); font-size: 0.86em; background: var(--code); border: 1px solid var(--line); padding: 1px 5px; border-radius: 5px; }
+pre { background: var(--code); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; font: 12.5px/1.6 var(--mono); margin: 0 0 14px; }
+pre code { background: none; border: 0; padding: 0; font-size: inherit; }
+pre .c { color: var(--ink-3); }
+pre .k { color: var(--daemon); }
+pre .s { color: var(--disk); }
+
+/* Layout */
+.topbar { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+.topbar-in { max-width: 1240px; margin: 0 auto; padding: 10px 24px; display: flex; align-items: center; gap: 12px; }
+.topbar b { font-size: 14px; }
+.topbar span { color: var(--ink-3); font-size: 13px; }
+.spacer { flex: 1; }
+.theme-btn { font: 13px var(--sans); color: var(--ink-2); background: var(--surface); border: 1px solid var(--line); border-radius: 99px; padding: 5px 12px; cursor: pointer; }
+.layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 44px; max-width: 1240px; margin: 0 auto; padding: 0 24px 80px; }
+.toc { position: sticky; top: 64px; align-self: start; padding-top: 36px; font-size: 13.5px; max-height: calc(100vh - 70px); overflow-y: auto; }
+.toc a { display: block; color: var(--ink-2); padding: 4px 0 4px 12px; border-left: 2px solid var(--line); }
+.toc a:hover { color: var(--ink); border-left-color: var(--daemon); text-decoration: none; }
+.toc .toc-h { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; margin: 14px 0 6px; }
+.toc .toc-h:first-child { margin-top: 0; }
+main { min-width: 0; }
+.mobile-toc { display: none; }
+@media (max-width: 1000px) {
+  .layout { grid-template-columns: minmax(0, 1fr); padding: 0 16px 60px; }
+  .toc { display: none; }
+  .topbar-in { padding: 10px 16px; }
+  .mobile-toc { display: block; margin-top: 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
+  .mobile-toc summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+  .mobile-toc a { display: block; padding: 3px 0; font-size: 14px; }
+  h2 { font-size: 25px; }
+}
+
+/* Hero */
+.hero { padding: 44px 0 10px; }
+.hero h1 { font-size: 44px; margin: 0 0 14px; letter-spacing: -0.03em; }
+.hero .sub { font-size: 19px; color: var(--ink-2); max-width: 760px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 6px; }
+.chip { background: var(--surface); border: 1px solid var(--line); border-radius: 99px; padding: 5px 12px; font-size: 13px; color: var(--ink-2); }
+.chip b { color: var(--ink); }
+.checked { font-size: 13px; color: var(--ink-3); margin-top: 10px; }
+@media (max-width: 640px) { .hero h1 { font-size: 32px; } .hero .sub { font-size: 17px; } .topbar span { display: none; } }
+
+/* Sections */
+section { padding-top: 64px; scroll-margin-top: 50px; }
+.eyebrow { font: 700 12px var(--mono); letter-spacing: 0.08em; color: var(--daemon); }
+.lede { font-size: 17px; color: var(--ink-2); max-width: 760px; }
+.muted { color: var(--ink-2); }
+.small { font-size: 14px; }
+
+/* Cards */
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; margin: 18px 0; }
+.cards.two { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; min-width: 0; }
+.card h4 { margin: 0 0 6px; font-size: 16px; }
+.card p { font-size: 14.5px; color: var(--ink-2); margin: 0 0 8px; }
+.card p:last-child { margin-bottom: 0; }
+.card .file { font: 12px var(--mono); color: var(--ink-3); }
+.card.web { border-top: 4px solid var(--web); }
+.card.daemon { border-top: 4px solid var(--daemon); }
+.card.loop { border-top: 4px solid var(--loop); }
+.card.disk { border-top: 4px solid var(--disk); }
+.card.ext { border-top: 4px solid var(--ext); }
+.badge { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; font: 700 13px var(--mono); margin-bottom: 10px; }
+.badge.web { background: var(--web-soft); color: var(--web); }
+.badge.daemon { background: var(--daemon-soft); color: var(--daemon); }
+.badge.loop { background: var(--loop-soft); color: var(--loop); }
+.badge.disk { background: var(--disk-soft); color: var(--disk); }
+.badge.ext { background: var(--ext-soft); color: var(--ext); }
+
+.callout { border-left: 3px solid var(--daemon); background: var(--daemon-soft); padding: 12px 16px; border-radius: 0 10px 10px 0; margin: 16px 0; font-size: 15px; }
+.callout.disk { border-left-color: var(--disk); background: var(--disk-soft); }
+.callout.loop { border-left-color: var(--loop); background: var(--loop-soft); }
+.callout.ext { border-left-color: var(--ext); background: var(--ext-soft); }
+.callout.web { border-left-color: var(--web); background: var(--web-soft); }
+.callout b:first-child { display: block; margin-bottom: 2px; }
+
+.pitch { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 22px; margin: 18px 0; }
+.pitch ol { margin: 8px 0 0; padding-left: 22px; }
+.pitch li { margin: 6px 0; }
+
+/* Diagrams */
+.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; overflow-x: auto; margin: 18px 0 8px; }
+.diagram svg { display: block; width: 100%; min-width: 760px; height: auto; }
+.diagram.narrow svg { min-width: 640px; }
+.cap-note { font-size: 13px; color: var(--ink-3); margin: 0 0 14px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--ink-2); margin: 6px 0 0; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+
+svg text { font-family: var(--sans); fill: var(--ink); }
+svg .t { font-size: 14px; font-weight: 650; }
+svg .t-c { font-size: 14px; font-weight: 650; text-anchor: middle; }
+svg .s { font-size: 12px; fill: var(--ink-2); }
+svg .s-c { font-size: 12px; fill: var(--ink-2); text-anchor: middle; }
+svg .m { font-family: var(--mono); font-size: 11.5px; fill: var(--ink-2); }
+svg .m-ink { font-family: var(--mono); font-size: 11.5px; fill: var(--ink); }
+svg .cap { font-size: 11px; letter-spacing: 0.09em; fill: var(--ink-3); font-weight: 700; }
+svg .lbl { font-size: 12px; fill: var(--ink-2); }
+svg .lbl-c { font-size: 12px; fill: var(--ink-2); text-anchor: middle; }
+svg .num { font: 700 11px var(--mono); fill: var(--surface); text-anchor: middle; }
+svg .tc-daemon { fill: var(--daemon); }
+svg .tc-disk { fill: var(--disk); }
+.n-surface { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+.n-row { fill: var(--surface); stroke: var(--daemon); stroke-width: 1.1; }
+.n-web { fill: var(--web-soft); stroke: var(--web); stroke-width: 1.4; }
+.n-daemon { fill: var(--daemon-soft); stroke: var(--daemon); stroke-width: 1.4; }
+.n-zone { fill: var(--daemon-soft); stroke: var(--daemon); stroke-width: 1.4; stroke-dasharray: 7 5; }
+.n-runtime { fill: var(--surface-2); stroke: var(--ink-3); stroke-width: 1.1; stroke-dasharray: 4 4; }
+.n-loop { fill: var(--loop-soft); stroke: var(--loop); stroke-width: 1.4; }
+.n-disk { fill: var(--disk-soft); stroke: var(--disk); stroke-width: 1.4; }
+.n-ext { fill: var(--ext-soft); stroke: var(--ext); stroke-width: 1.4; }
+.n-table { fill: var(--surface); stroke: var(--disk); stroke-width: 1.3; }
+.sep { stroke: var(--line); stroke-width: 1.2; }
+.life { stroke: var(--ink-3); stroke-width: 1.2; stroke-dasharray: 3 6; }
+.a { stroke: var(--ink-3); stroke-width: 1.6; fill: none; }
+.a-web { stroke: var(--web); stroke-width: 1.7; fill: none; }
+.a-loop { stroke: var(--loop); stroke-width: 1.7; fill: none; }
+.a-disk { stroke: var(--disk); stroke-width: 1.7; fill: none; }
+.a-ext { stroke: var(--ext); stroke-width: 1.7; fill: none; }
+.a-daemon { stroke: var(--daemon); stroke-width: 1.7; fill: none; }
+.dash { stroke-dasharray: 5 5; }
+.ah { fill: var(--ink-3); } .ah-web { fill: var(--web); } .ah-loop { fill: var(--loop); }
+.ah-disk { fill: var(--disk); } .ah-ext { fill: var(--ext); } .ah-daemon { fill: var(--daemon); }
+.dot-web { fill: var(--web); } .dot-daemon { fill: var(--daemon); } .dot-loop { fill: var(--loop); } .dot-disk { fill: var(--disk); }
+
+/* Stack (daemon layers) */
+.stack { display: grid; gap: 8px; margin: 18px 0; }
+.layer { display: grid; grid-template-columns: 44px 190px minmax(0, 1fr); gap: 14px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; }
+.layer .n { font: 700 13px var(--mono); color: var(--ink-3); }
+.layer .name { font-weight: 650; }
+.layer .name small { display: block; font: 12px var(--mono); color: var(--ink-3); font-weight: 400; margin-top: 2px; }
+.layer .job { font-size: 14.5px; color: var(--ink-2); }
+.layer.web { border-left: 5px solid var(--web); }
+.layer.daemon { border-left: 5px solid var(--daemon); }
+.layer.loop { border-left: 5px solid var(--loop); }
+.layer.disk { border-left: 5px solid var(--disk); }
+@media (max-width: 640px) { .layer { grid-template-columns: 30px minmax(0, 1fr); } .layer .job { grid-column: 2; } }
+
+/* Flow steps */
+.flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 18px 0; }
+.step { flex: 1 1 150px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font-size: 14px; position: relative; min-width: 0; }
+.step b { display: block; font-size: 14.5px; margin-bottom: 3px; }
+.step span { color: var(--ink-2); }
+.step .file { display: block; font: 11.5px var(--mono); color: var(--ink-3); margin-top: 6px; }
+.arrow { align-self: center; color: var(--ink-3); font-size: 18px; }
+@media (max-width: 640px) { .arrow { display: none; } }
+
+/* Tables */
+.table-wrap { overflow-x: auto; margin: 14px 0 18px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); background: var(--surface-2); }
+tr:last-child td { border-bottom: 0; }
+td code { white-space: nowrap; }
+.tname { font: 700 15px var(--mono); color: var(--disk); }
+
+.tag { display: inline-block; font: 600 11px var(--sans); padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
+.tag.git { background: var(--disk-soft); color: var(--disk); }
+.tag.private { background: var(--ext-soft); color: var(--ext); }
+.tag.db { background: var(--web-soft); color: var(--web); }
+.tag.plain { background: var(--code); color: var(--ink-2); border: 1px solid var(--line); }
+
+.tree { font: 13px/1.85 var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; overflow-x: auto; white-space: pre; }
+.tree .d { color: var(--ink); font-weight: 700; }
+.tree .x { color: var(--ink-3); }
+
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.grid2 > div { min-width: 0; }
+.schema h4 { margin: 0 0 4px; font: 700 14px var(--mono); }
+.schema p { font-size: 14px; color: var(--ink-2); margin: 0 0 8px; }
+
+.pass { margin: 18px 0; }
+.pass h3 { margin: 0 0 8px; font-size: 16px; }
+.pass h3 span { color: var(--ink-3); font-weight: 500; font-size: 14px; }
+.reading td:first-child { width: 42%; }
+.yes { color: var(--disk); font-weight: 700; }
+.no { color: var(--ext); font-weight: 700; }
+
+footer { margin-top: 70px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-3); }
+</style>
+</head>
+<body>
+
+<!-- Shared arrowheads for every diagram. Kept out of display:none so markers render everywhere. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+    <marker id="ah-web" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah-web"/></marker>
+    <marker id="ah-loop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah-loop"/></marker>
+    <marker id="ah-disk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah-disk"/></marker>
+    <marker id="ah-ext" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah-ext"/></marker>
+    <marker id="ah-daemon" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah-daemon"/></marker>
+  </defs>
+</svg>
+
+<div class="topbar"><div class="topbar-in">
+  <b>Personal agent</b><span>system design, from first principles</span>
+  <div class="spacer"></div>
+  <button class="theme-btn" id="theme" type="button">Theme</button>
+</div></div>
+
+<div class="layout">
+<nav class="toc" aria-label="Contents">
+  <div class="toc-h">The idea</div>
+  <a href="#four">1. Four parts</a>
+  <a href="#picture">2. The whole picture</a>
+  <a href="#choices">3. Five design choices</a>
+  <div class="toc-h">The code</div>
+  <a href="#apps">4. Two apps</a>
+  <a href="#layers">5. Daemon layers</a>
+  <a href="#loop">6. The agent loop</a>
+  <a href="#message">7. One message, end to end</a>
+  <a href="#responses">8. What comes back</a>
+  <div class="toc-h">The data</div>
+  <a href="#saving">9. Sending and saving</a>
+  <a href="#tables">10. The database tables</a>
+  <a href="#files">11. The home folder files</a>
+  <div class="toc-h">The features</div>
+  <a href="#tools">12. Tools</a>
+  <a href="#learning">13. Learning</a>
+  <a href="#web">14. The web page</a>
+  <div class="toc-h">What next</div>
+  <a href="#electron">15. An Electron app</a>
+  <a href="#work">16. How to work on it</a>
+  <a href="#reading">17. The 20% to read</a>
+</nav>
+
+<main>
+<header class="hero">
+  <h1>How the personal agent is built</h1>
+  <p class="sub">It's one Node process on your Mac. It runs an AI loop, keeps everything it knows in one folder, and serves a React chat page. This page covers the 20% of the code that explains the other 80%.</p>
+  <div class="chips">
+    <span class="chip"><b>2</b> apps: daemon + web</span>
+    <span class="chip"><b>93</b> source files · <b>12.6k</b> lines</span>
+    <span class="chip"><b>1</b> SQLite file · <b>5</b> tables</span>
+    <span class="chip"><b>0</b> servers of its own in the cloud</span>
+    <span class="chip">localhost <b>:4545</b> only</span>
+  </div>
+  <p class="checked">Checked against the code at <code>e4657f1</code> (branch <code>refactor/learning-kinds</code>, same code as <code>main</code>), 9 Nov 2026.</p>
+  <details class="mobile-toc"><summary>Contents</summary>
+    <a href="#four">1. Four parts</a><a href="#picture">2. The whole picture</a><a href="#choices">3. Five design choices</a>
+    <a href="#apps">4. Two apps</a><a href="#layers">5. Daemon layers</a><a href="#loop">6. The agent loop</a>
+    <a href="#message">7. One message, end to end</a><a href="#responses">8. What comes back</a>
+    <a href="#saving">9. Sending and saving</a><a href="#tables">10. The database tables</a><a href="#files">11. The home folder files</a>
+    <a href="#tools">12. Tools</a><a href="#learning">13. Learning</a><a href="#web">14. The web page</a>
+    <a href="#electron">15. An Electron app</a><a href="#work">16. How to work on it</a><a href="#reading">17. The 20% to read</a>
+  </details>
+</header>
+
+<!-- 1 -->
+<section id="four">
+  <div class="eyebrow">01 · FIRST PRINCIPLES</div>
+  <h2>An agent is four parts</h2>
+  <p class="lede">Every AI agent, this one included, comes down to four parts. Everything else in the repo connects them.</p>
+  <div class="cards">
+    <div class="card loop"><div class="badge loop">1</div><h4>A loop</h4><p>Send the conversation to a model. If it asks for a tool, run the tool, add the result, and ask again. Stop when it simply answers.</p><p class="file">vendor/pi-core/agent-loop.ts</p></div>
+    <div class="card disk"><div class="badge disk">2</div><h4>A memory</h4><p>What it keeps: every message (SQLite), what it learned (Markdown files + git), and settings and logins (private JSON).</p><p class="file">~/.personal-agent</p></div>
+    <div class="card web"><div class="badge web">3</div><h4>A face</h4><p>How you talk to it: a React page in the browser, or the terminal. Later, WhatsApp.</p><p class="file">apps/web · cli.ts</p></div>
+    <div class="card ext"><div class="badge ext">4</div><h4>Hands</h4><p>Tools that do things: edit its own memory, skills and wiki, search past chats, and call outside apps through MCP or Composio.</p><p class="file">learning/ · mcp/ · composio/</p></div>
+  </div>
+  <div class="callout"><b>The one sentence to remember</b>A <em>conversation</em> is a list of messages. The loop sends that list to a model with a menu of tools, runs whatever tools the model picks, and saves every message as it goes.</div>
+</section>
+
+<!-- 2 -->
+<section id="picture">
+  <div class="eyebrow">02 · THE WHOLE SYSTEM</div>
+  <h2>The whole picture</h2>
+  <p class="lede">You talk to the daemon. The daemon talks to a model, to outside tools, and to its home folder. Nothing else is involved.</p>
+  <div class="diagram">
+  <svg viewBox="0 0 1000 580" role="img" aria-label="System diagram: browser and terminal talk to the daemon; the daemon talks to model providers, MCP servers, Composio and the home folder">
+    <text x="20" y="26" class="cap">YOU</text>
+    <text x="310" y="26" class="cap">THE DAEMON · apps/daemon</text>
+    <text x="760" y="26" class="cap">OUTSIDE + DISK</text>
+
+    <!-- Browser -->
+    <rect x="20" y="60" width="220" height="140" rx="12" class="n-web"/>
+    <text x="38" y="90" class="t">Browser</text>
+    <text x="38" y="112" class="s">React chat page (apps/web)</text>
+    <text x="38" y="132" class="s">chat · bots · settings dialogs</text>
+    <text x="38" y="152" class="s">one live stream + POST writes</text>
+    <text x="38" y="180" class="m">localhost:4545</text>
+    <!-- Terminal -->
+    <rect x="20" y="270" width="220" height="110" rx="12" class="n-web"/>
+    <text x="38" y="300" class="t">Terminal</text>
+    <text x="38" y="322" class="m">pnpm start · cli.ts</text>
+    <text x="38" y="342" class="s">uses the same Conversation</text>
+    <text x="38" y="360" class="s">class, with no HTTP between</text>
+
+    <!-- Daemon zone -->
+    <rect x="310" y="40" width="400" height="520" rx="16" class="n-zone"/>
+    <text x="330" y="66" class="t tc-daemon">One Node process · 127.0.0.1:4545</text>
+    <rect x="330" y="82" width="360" height="60" rx="10" class="n-row"/>
+    <text x="346" y="106" class="t">HTTP server</text>
+    <text x="346" y="127" class="m">server.ts · routes/ · events.ts (SSE)</text>
+    <rect x="330" y="156" width="360" height="52" rx="10" class="n-row"/>
+    <text x="346" y="178" class="t">Registry</text>
+    <text x="346" y="197" class="s">the one active conversation + "busy" flags</text>
+    <rect x="330" y="222" width="360" height="60" rx="10" class="n-row"/>
+    <text x="346" y="246" class="t">Conversation</text>
+    <text x="346" y="267" class="s">prompt + tools · saves each message · reviews</text>
+    <rect x="330" y="296" width="240" height="60" rx="10" class="n-loop"/>
+    <text x="346" y="320" class="t">Agent loop (Pi core)</text>
+    <text x="346" y="341" class="s">model ↔ tools until it answers</text>
+    <rect x="582" y="296" width="108" height="60" rx="10" class="n-row"/>
+    <text x="596" y="320" class="t">Models</text>
+    <text x="596" y="341" class="m">models/</text>
+    <line x1="510" y1="142" x2="510" y2="153" class="a-daemon" marker-end="url(#ah-daemon)"/>
+    <line x1="510" y1="208" x2="510" y2="219" class="a-daemon" marker-end="url(#ah-daemon)"/>
+    <line x1="450" y1="282" x2="450" y2="293" class="a-daemon" marker-end="url(#ah-daemon)"/>
+
+    <!-- Runtime -->
+    <rect x="330" y="372" width="360" height="172" rx="12" class="n-runtime"/>
+    <text x="346" y="394" class="t">Runtime</text>
+    <text x="412" y="394" class="s">shared stores · runtime.ts</text>
+    <rect x="344" y="408" width="106" height="56" rx="8" class="n-surface"/>
+    <text x="356" y="432" class="t">Home</text><text x="356" y="451" class="m">home.ts · git</text>
+    <rect x="461" y="408" width="106" height="56" rx="8" class="n-surface"/>
+    <text x="473" y="432" class="t">Bots</text><text x="473" y="451" class="m">bots.ts</text>
+    <rect x="578" y="408" width="106" height="56" rx="8" class="n-surface"/>
+    <text x="590" y="432" class="t">MCP</text><text x="590" y="451" class="m">mcp/</text>
+    <rect x="344" y="474" width="106" height="56" rx="8" class="n-surface"/>
+    <text x="356" y="498" class="t">Sessions</text><text x="356" y="517" class="m">sessions.ts</text>
+    <rect x="461" y="474" width="106" height="56" rx="8" class="n-surface"/>
+    <text x="473" y="498" class="t">Skills</text><text x="473" y="517" class="m">learning/</text>
+    <rect x="578" y="474" width="106" height="56" rx="8" class="n-surface"/>
+    <text x="590" y="498" class="t">Composio</text><text x="590" y="517" class="m">composio/</text>
+
+    <!-- Right column -->
+    <rect x="760" y="60" width="220" height="112" rx="12" class="n-ext"/>
+    <text x="778" y="88" class="t">Model providers</text>
+    <text x="778" y="110" class="s">OpenAI · ChatGPT sign-in or key</text>
+    <text x="778" y="130" class="s">Anthropic · API key</text>
+    <text x="778" y="154" class="m">through pi-ai</text>
+    <rect x="760" y="196" width="220" height="92" rx="12" class="n-ext"/>
+    <text x="778" y="224" class="t">MCP servers</text>
+    <text x="778" y="246" class="s">a remote URL or a local program</text>
+    <text x="778" y="266" class="s">you tick which tools it may use</text>
+    <rect x="760" y="312" width="220" height="92" rx="12" class="n-ext"/>
+    <text x="778" y="340" class="t">Composio cloud</text>
+    <text x="778" y="362" class="s">Gmail, Calendar and other apps</text>
+    <text x="778" y="382" class="s">one labelled account per call</text>
+    <rect x="760" y="428" width="220" height="132" rx="12" class="n-disk"/>
+    <text x="778" y="456" class="t">Home folder</text>
+    <text x="778" y="477" class="m">~/.personal-agent</text>
+    <text x="778" y="499" class="s">sessions.db (SQLite)</text>
+    <text x="778" y="519" class="s">Markdown files + git commits</text>
+    <text x="778" y="539" class="s">private JSON files (0600)</text>
+
+    <!-- Arrows -->
+    <line x1="240" y1="100" x2="326" y2="100" class="a-web" marker-end="url(#ah-web)"/>
+    <text x="252" y="92" class="lbl">POST</text>
+    <line x1="330" y1="126" x2="244" y2="126" class="a-web dash" marker-end="url(#ah-web)"/>
+    <text x="252" y="144" class="lbl">SSE</text>
+    <path d="M240,325 C288,325 286,252 326,252" class="a-web" marker-end="url(#ah-web)"/>
+    <path d="M690,326 C728,326 722,116 756,116" class="a-ext" marker-end="url(#ah-ext)"/>
+    <path d="M684,436 C728,436 720,242 756,242" class="a-ext" marker-end="url(#ah-ext)"/>
+    <path d="M684,502 C730,502 720,358 756,358" class="a-ext" marker-end="url(#ah-ext)"/>
+    <line x1="690" y1="537" x2="756" y2="537" class="a-disk" marker-end="url(#ah-disk)"/>
+  </svg>
+  </div>
+  <div class="legend">
+    <span><i style="background:var(--web)"></i>how you talk to it</span>
+    <span><i style="background:var(--daemon)"></i>the daemon</span>
+    <span><i style="background:var(--loop)"></i>the loop</span>
+    <span><i style="background:var(--ext)"></i>outside services</span>
+    <span><i style="background:var(--disk)"></i>disk</span>
+  </div>
+
+  <h3>Say it in five sentences</h3>
+  <div class="pitch">
+    If you present this to someone, this is the whole architecture:
+    <ol>
+      <li>The agent is one Node process on my Mac, called the <b>daemon</b>. It only listens on <code>localhost:4545</code>.</li>
+      <li>Inside it, Pi's <b>agent loop</b> sends the conversation to a model (ChatGPT or Claude) and runs the tools the model asks for until it answers.</li>
+      <li>A <b>React page</b> sends actions as POST requests and gets the reply as a live <b>SSE stream</b>. The terminal chat calls the same code directly.</li>
+      <li>Everything it keeps lives in one <b>home folder</b>: conversations and token costs in SQLite, what it learned in Markdown files committed to git, and logins in private JSON files.</li>
+      <li>Every 10 messages, a <b>background review</b> rereads the conversation and decides what to remember. Each change must quote my own words.</li>
+    </ol>
+  </div>
+</section>
+
+<!-- 3 -->
+<section id="choices">
+  <div class="eyebrow">03 · WHY IT LOOKS LIKE THIS</div>
+  <h2>Five design choices that explain the code</h2>
+  <p class="lede">Most of the code follows from these five choices. Learn them and the rest is easy to predict.</p>
+  <div class="cards">
+    <div class="card"><h4>1 · Local only</h4><p>One process on your Mac, listening only on loopback. There are no accounts, so there's no login code. The cost: never expose the port.</p><p class="file">http/validation.ts checkOrigin</p></div>
+    <div class="card"><h4>2 · It owns its history</h4><p>Every message is saved as full JSON in SQLite, not left with the provider. Any model can pick up any conversation later.</p><p class="file">sessions.ts</p></div>
+    <div class="card"><h4>3 · Learning you can audit</h4><p>Memory, skills, bots and the wiki are Markdown files. Each change is a git commit with its reason, so <code>git log</code> shows what it learned and <code>git revert</code> undoes it.</p><p class="file">home.ts commit()</p></div>
+    <div class="card"><h4>4 · One prompt per conversation</h4><p>The system prompt is built once and never changes mid-conversation, so the provider can cache it. New memories show up in the <em>next</em> conversation.</p><p class="file">conversations/prompt.ts</p></div>
+    <div class="card"><h4>5 · Thin routes, state in its owner</h4><p>HTTP handlers only validate and delegate. Each piece of state has one owner: the registry owns the active chat, SessionStore owns SQLite, and MemoryStore owns its files.</p><p class="file">http/routes/*</p></div>
+  </div>
+</section>
+
+<!-- 4 -->
+<section id="apps">
+  <div class="eyebrow">04 · THE REPO</div>
+  <h2>Two apps, one rule</h2>
+  <p class="lede">A pnpm workspace with two apps. They never import each other. They only share HTTP and SSE.</p>
+  <div class="cards two">
+    <div class="card daemon">
+      <h4>apps/daemon: the brain and the server</h4>
+      <p>Node 24 runs the <code>.ts</code> files directly, with no build step. It uses Node's built-in <code>node:sqlite</code>.</p>
+      <p>Dependencies: <code>pi-ai</code> (model providers), <code>@modelcontextprotocol/client</code>, <code>typebox</code> (schemas), <code>yaml</code>.</p>
+      <p class="file">src/ · test/ (unit, journeys, emulators) · evals/</p>
+    </div>
+    <div class="card web">
+      <h4>apps/web: the face</h4>
+      <p>React 19, Vite, Tailwind 4, React Query, Base UI, React Router (URL only).</p>
+      <p><code>pnpm build</code> writes <code>apps/web/dist</code>. The daemon reads that build once at startup and serves it, so a rebuild needs a restart.</p>
+      <p class="file">src/api · src/shell · src/settings · src/mcp · src/connections · src/bots</p>
+    </div>
+  </div>
+  <div class="callout web"><b>The rule</b>Browser code can't import daemon code, and the daemon can't import browser code. Biome enforces this. The web types the daemon's JSON by hand in <code>api/wire.ts</code>, and <code>e2e/wire-contract.ts</code> checks those types against the daemon's own at compile time, so the two can't drift without <code>pnpm check</code> failing.</div>
+  <h3>Where the parts came from</h3>
+  <div class="table-wrap"><table>
+    <tr><th>Part</th><th>Origin</th><th>Lives in</th></tr>
+    <tr><td>Agent loop</td><td>Forked from Pi's agent core (MIT), unchanged so far</td><td><code>apps/daemon/src/vendor/pi-core/</code></td></tr>
+    <tr><td>Model providers, sign-in, streaming</td><td>The <code>@earendil-works/pi-ai</code> package</td><td><code>models/registry.ts</code> registers them</td></tr>
+    <tr><td>Memory, skills, background reviews, prompts</td><td>Ported from Hermes Agent (MIT)</td><td><code>apps/daemon/src/learning/</code></td></tr>
+    <tr><td>UI kit and colour tokens</td><td>Started from Rakazo (Apache-2.0)</td><td><code>apps/web/src/components/ui</code>, <code>styles/tokens.css</code></td></tr>
+  </table></div>
+</section>
+
+<!-- 5 -->
+<section id="layers">
+  <div class="eyebrow">05 · INSIDE THE DAEMON</div>
+  <h2>The daemon, top to bottom</h2>
+  <p class="lede">Each layer only calls the layers below it. A request enters at the top and the data lands at the bottom.</p>
+  <div class="stack">
+    <div class="layer web"><span class="n">L1</span><div class="name">Entry points<small>server.ts · cli.ts</small></div><div class="job">Opens the runtime, wires routes and callbacks, starts listening. Shutdown stops the reply and reviews first, then closes SQLite.</div></div>
+    <div class="layer daemon"><span class="n">L2</span><div class="name">HTTP<small>http/</small></div><div class="job"><code>validation.ts</code> checks host, origin, JSON and schema. <code>routes/*.ts</code> are thin handlers. <code>events.ts</code> is the SSE broadcaster. <code>static.ts</code> serves the built page and images.</div></div>
+    <div class="layer daemon"><span class="n">L3</span><div class="name">Registry<small>conversations/registry.ts</small></div><div class="job">Holds <b>exactly one</b> active conversation for the whole server, plus <code>starting</code> and <code>replying</code> flags. It builds the snapshot every tab shows and forwards loop events to SSE.</div></div>
+    <div class="layer daemon"><span class="n">L4</span><div class="name">Conversation<small>conversations/conversation.ts</small></div><div class="job">Owns one Pi <code>Agent</code>. It builds the system prompt and tool list, saves every message to SQLite, counts toward reviews, and blocks learning writes after outside data arrives.</div></div>
+    <div class="layer loop"><span class="n">L5</span><div class="name">Agent loop<small>vendor/pi-core</small></div><div class="job">Model ↔ tools until done. It emits events (<code>message_end</code>, <code>tool_execution_start</code> and others) that layers 3 and 4 listen to.</div></div>
+    <div class="layer daemon"><span class="n">L6</span><div class="name">Runtime + models<small>runtime.ts · models/</small></div><div class="job">The shared stores: <code>Home</code>, <code>Bots</code>, <code>SessionStore</code>, <code>SkillStore</code>, <code>McpAdapter</code>, <code>ComposioAdapter</code>. <code>models/</code> picks the model and its stream function for each new conversation.</div></div>
+    <div class="layer disk"><span class="n">L7</span><div class="name">Disk<small>~/.personal-agent</small></div><div class="job">SQLite, Markdown and git, and private JSON. Set <code>AGENT_HOME</code> to use a different folder, which is how tests stay away from your real agent.</div></div>
+  </div>
+  <pre><code><span class="c">// apps/daemon/src/runtime.ts: the daemon's table of contents (the whole file is 31 lines)</span>
+<span class="k">export interface</span> Runtime {
+  home: Home;                 <span class="c">// the folder, its .gitignore, and the one git commit queue</span>
+  bots: Bots;                 <span class="c">// bots/&lt;id&gt;/bot.md, plus each bot's memory, history and wiki access</span>
+  mcp?: McpAdapter;           <span class="c">// MCP servers → tools</span>
+  composio?: ComposioAdapter; <span class="c">// Composio accounts → tools</span>
+  skills: SkillStore;         <span class="c">// skills/&lt;name&gt;/SKILL.md</span>
+  sessions: SessionStore;     <span class="c">// sessions.db</span>
+}</code></pre>
+</section>
+
+<!-- 6 -->
+<section id="loop">
+  <div class="eyebrow">06 · THE HEART</div>
+  <h2>The agent loop</h2>
+  <p class="lede">The model can't do anything by itself. It can only <em>ask</em> for a tool. The loop runs the tool and asks again.</p>
+  <div class="diagram narrow">
+  <svg viewBox="0 0 900 320" role="img" aria-label="Agent loop: messages go to the model; if it asks for tools they run and results go back to the model; otherwise done">
+    <rect x="10" y="135" width="190" height="90" rx="12" class="n-surface"/>
+    <text x="26" y="165" class="t">Messages</text>
+    <text x="26" y="186" class="s">system prompt + history</text>
+    <text x="26" y="205" class="s">+ your new text</text>
+    <rect x="250" y="135" width="170" height="90" rx="12" class="n-loop"/>
+    <text x="266" y="165" class="t">Model</text>
+    <text x="266" y="186" class="s">streamFn (pi-ai)</text>
+    <text x="266" y="205" class="s">streams text + tool calls</text>
+    <polygon points="520,125 590,180 520,235 450,180" class="n-surface"/>
+    <text x="520" y="176" class="t-c">Tool</text>
+    <text x="520" y="194" class="t-c">calls?</text>
+    <rect x="640" y="50" width="250" height="90" rx="12" class="n-daemon"/>
+    <text x="656" y="80" class="t">Run each tool, in order</text>
+    <text x="656" y="101" class="s">beforeToolCall can block it</text>
+    <text x="656" y="120" class="s">result → a toolResult message</text>
+    <rect x="640" y="220" width="250" height="90" rx="12" class="n-disk"/>
+    <text x="656" y="250" class="t">Done</text>
+    <text x="656" y="271" class="s">the answer is the last message</text>
+    <text x="656" y="290" class="s">agent_end event</text>
+    <line x1="200" y1="180" x2="246" y2="180" class="a" marker-end="url(#ah)"/>
+    <line x1="420" y1="180" x2="446" y2="180" class="a" marker-end="url(#ah)"/>
+    <path d="M555,152 C590,120 600,95 636,95" class="a-daemon" marker-end="url(#ah-daemon)"/>
+    <text x="574" y="116" class="lbl">yes</text>
+    <path d="M555,208 C590,240 600,265 636,265" class="a-disk" marker-end="url(#ah-disk)"/>
+    <text x="578" y="256" class="lbl">no</text>
+    <path d="M765,50 C765,10 335,10 335,131" class="a-daemon dash" marker-end="url(#ah-daemon)"/>
+    <text x="452" y="76" class="lbl">add results, ask again</text>
+  </svg>
+  </div>
+  <pre><code><span class="c">// The idea of runLoop() in vendor/pi-core/agent-loop.ts, simplified to its core</span>
+<span class="k">while</span> (<span class="k">true</span>) {
+  <span class="k">const</span> reply = <span class="k">await</span> streamFn(model, { messages, tools }); <span class="c">// emits text_delta events as it streams</span>
+  messages.push(reply);
+  <span class="k">const</span> calls = reply.content.filter((part) =&gt; part.type === <span class="s">"toolCall"</span>);
+  <span class="k">if</span> (calls.length === 0) <span class="k">break</span>;                            <span class="c">// a plain answer: done</span>
+  <span class="k">for</span> (<span class="k">const</span> call <span class="k">of</span> calls) {                                   <span class="c">// toolExecution: "sequential"</span>
+    <span class="k">const</span> block = <span class="k">await</span> beforeToolCall(call);                   <span class="c">// safety hook from conversation.ts</span>
+    <span class="k">const</span> result = block ? block.reason : <span class="k">await</span> tool.execute(call.arguments);
+    messages.push({ role: <span class="s">"toolResult"</span>, ...result });
+  }
+}</code></pre>
+  <h3>Who listens to the loop's events</h3>
+  <div class="cards two">
+    <div class="card"><h4>Conversation</h4><p><code>message_end</code> saves the message to SQLite, and a model call to <code>model_calls</code>. <code>turn_start</code> and <code>tool_execution_start</code> count toward reviews and reset them.</p><p class="file">conversation.ts constructor</p></div>
+    <div class="card"><h4>Registry</h4><p><code>text_delta</code> becomes SSE <code>{type:"text"}</code>, <code>tool_execution_start</code> becomes <code>{type:"tool"}</code>, and a failed reply becomes <code>{type:"error"}</code>.</p><p class="file">registry.ts start()</p></div>
+  </div>
+</section>
+
+<!-- 7 -->
+<section id="message">
+  <div class="eyebrow">07 · FOLLOW ONE MESSAGE</div>
+  <h2>One message, end to end</h2>
+  <p class="lede">You type "Draft an opener for Acme" and press Enter. This is every hop. The POST returns right away, and the reply arrives over the live stream.</p>
+  <div class="diagram">
+  <svg viewBox="0 0 1000 850" role="img" aria-label="Sequence diagram of one chat message from browser to model and back">
+    <!-- lane headers -->
+    <rect x="15" y="10" width="170" height="50" rx="10" class="n-web"/><text x="100" y="31" class="t-c">Browser</text><text x="100" y="49" class="s-c">live.ts</text>
+    <rect x="215" y="10" width="170" height="50" rx="10" class="n-daemon"/><text x="300" y="31" class="t-c">Server</text><text x="300" y="49" class="s-c">routes + registry</text>
+    <rect x="415" y="10" width="170" height="50" rx="10" class="n-daemon"/><text x="500" y="31" class="t-c">Conversation</text><text x="500" y="49" class="s-c">+ agent loop</text>
+    <rect x="615" y="10" width="170" height="50" rx="10" class="n-loop"/><text x="700" y="31" class="t-c">Model provider</text><text x="700" y="49" class="s-c">OpenAI / Anthropic</text>
+    <rect x="815" y="10" width="170" height="50" rx="10" class="n-disk"/><text x="900" y="31" class="t-c">Disk</text><text x="900" y="49" class="s-c">sessions.db + files</text>
+    <line x1="100" y1="60" x2="100" y2="840" class="life"/>
+    <line x1="300" y1="60" x2="300" y2="840" class="life"/>
+    <line x1="500" y1="60" x2="500" y2="840" class="life"/>
+    <line x1="700" y1="60" x2="700" y2="840" class="life"/>
+    <line x1="900" y1="60" x2="900" y2="840" class="life"/>
+
+    <!-- 1 -->
+    <line x1="100" y1="100" x2="296" y2="100" class="a-web" marker-end="url(#ah-web)"/>
+    <text x="200" y="92" class="lbl-c">1 · POST /messages {text, bot}</text>
+    <!-- 2 -->
+    <rect x="178" y="128" width="244" height="30" rx="8" class="n-surface"/>
+    <text x="300" y="148" class="lbl-c">2 · check origin + schema · 409 if busy</text>
+    <!-- 3 -->
+    <line x1="300" y1="190" x2="104" y2="190" class="a-web dash" marker-end="url(#ah-web)"/>
+    <text x="200" y="182" class="lbl-c">3 · 202 (empty) + SSE user event</text>
+    <!-- 4 -->
+    <line x1="300" y1="235" x2="496" y2="235" class="a-daemon" marker-end="url(#ah-daemon)"/>
+    <text x="400" y="227" class="lbl-c">4 · start() if needed · send(text)</text>
+    <!-- 5 -->
+    <rect x="362" y="263" width="276" height="30" rx="8" class="n-surface"/>
+    <text x="500" y="283" class="lbl-c">5 · refresh tools: MCP reconnect, Composio</text>
+    <!-- 6 -->
+    <line x1="500" y1="325" x2="896" y2="325" class="a-disk" marker-end="url(#ah-disk)"/>
+    <text x="800" y="317" class="lbl-c">6 · INSERT your message → messages</text>
+    <!-- 7 -->
+    <line x1="500" y1="370" x2="696" y2="370" class="a-loop" marker-end="url(#ah-loop)"/>
+    <text x="600" y="362" class="lbl-c">7 · system prompt + history + tools</text>
+    <!-- 8 -->
+    <line x1="700" y1="415" x2="504" y2="415" class="a-loop dash" marker-end="url(#ah-loop)"/>
+    <text x="600" y="407" class="lbl-c">8 · toolCall: knowledge_search</text>
+    <!-- 9 -->
+    <rect x="345" y="443" width="310" height="30" rx="8" class="n-surface"/>
+    <text x="500" y="463" class="lbl-c">9 · run the tool · SSE tool event · save result</text>
+    <!-- 10 -->
+    <line x1="500" y1="505" x2="696" y2="505" class="a-loop" marker-end="url(#ah-loop)"/>
+    <text x="600" y="497" class="lbl-c">10 · tool result · ask again</text>
+    <!-- 11 -->
+    <line x1="700" y1="550" x2="504" y2="550" class="a-loop dash" marker-end="url(#ah-loop)"/>
+    <text x="600" y="542" class="lbl-c">11 · streamed text deltas</text>
+    <!-- 12 -->
+    <line x1="500" y1="595" x2="104" y2="595" class="a-web dash" marker-end="url(#ah-web)"/>
+    <text x="300" y="587" class="lbl-c">12 · SSE {type:"text", delta} × many → the page types it out</text>
+    <!-- 13 -->
+    <line x1="500" y1="640" x2="896" y2="640" class="a-disk" marker-end="url(#ah-disk)"/>
+    <text x="700" y="632" class="lbl-c">13 · INSERT each message + a model_calls row per model call</text>
+    <!-- 14 -->
+    <line x1="300" y1="685" x2="104" y2="685" class="a-web dash" marker-end="url(#ah-web)"/>
+    <text x="200" y="677" class="lbl-c">14 · SSE done, then bots</text>
+    <!-- 15 -->
+    <rect x="340" y="713" width="320" height="30" rx="8" class="n-surface"/>
+    <text x="500" y="733" class="lbl-c">15 · 10th message? start a background review</text>
+    <!-- 16 -->
+    <line x1="500" y1="775" x2="896" y2="775" class="a-disk dash" marker-end="url(#ah-disk)"/>
+    <text x="700" y="767" class="lbl-c">16 · review edits Markdown + git commit</text>
+    <!-- 17 -->
+    <line x1="500" y1="820" x2="104" y2="820" class="a-web dash" marker-end="url(#ah-web)"/>
+    <text x="300" y="812" class="lbl-c">17 · later: SSE {type:"learned", changes}</text>
+  </svg>
+  </div>
+  <p class="cap-note">Solid arrows are calls. Dashed arrows are answers or events that arrive later. Steps 7 to 11 repeat for as long as the model keeps asking for tools.</p>
+  <div class="callout"><b>Why the POST returns 202 before the reply</b>A reply can take a minute. The POST only says "accepted". Every open tab watches the same SSE stream, so a second tab sees the reply too. The server allows one reply at a time: a second send while one runs gets <code>409 Still replying</code>.</div>
+  <h3>The code for steps 1 to 4 and 14</h3>
+  <pre><code><span class="c">// apps/daemon/src/http/routes/chat.ts (trimmed)</span>
+<span class="s">"POST /messages"</span>: <span class="k">async</span> (request, response) =&gt; {
+  <span class="k">const</span> { text } = <span class="k">await</span> readJson(request, messageBody);     <span class="c">// ≤ 24,000 chars, schema-checked</span>
+  <span class="k">if</span> (registry.replying || registry.starting) <span class="k">throw new</span> RequestError(409, <span class="s">"Still replying…"</span>);
+  registry.conversation ??= <span class="k">await</span> registry.start(registry.currentBot(), <span class="k">true</span>); <span class="c">// resume latest</span>
+  registry.replying = <span class="k">true</span>;
+  broadcast({ type: <span class="s">"user"</span>, text, session: registry.conversation.id });
+  response.writeHead(202).end();                                <span class="c">// the browser is free now</span>
+  <span class="k">try</span> {
+    <span class="k">const</span> { review } = <span class="k">await</span> registry.conversation.send(text);  <span class="c">// the whole loop runs here</span>
+    <span class="k">if</span> (review) registry.announce(review, registry.conversation.bot.id);
+  } <span class="k">finally</span> {
+    registry.replying = <span class="k">false</span>;
+    broadcast({ type: <span class="s">"done"</span> });
+    broadcast({ type: <span class="s">"bots"</span>, bots: runtime.bots.list() });
+  }
+}</code></pre>
+</section>
+
+<!-- 8 -->
+<section id="responses">
+  <div class="eyebrow">08 · RESPONSES</div>
+  <h2>What comes back</h2>
+  <p class="lede">There are three kinds of answer: short HTTP replies, a stream of SSE events, and the model's own message that gets saved.</p>
+
+  <h3>1 · HTTP answers</h3>
+  <div class="table-wrap"><table>
+    <tr><th>Request</th><th>Answer</th><th>Then</th></tr>
+    <tr><td><code>POST /messages</code></td><td>202, empty</td><td>The reply streams over SSE</td></tr>
+    <tr><td><code>POST /open</code> · <code>POST /new</code></td><td>204, empty</td><td>A fresh <code>snapshot</code> event on SSE</td></tr>
+    <tr><td><code>POST /learn</code> (Review now)</td><td>202, empty</td><td>A <code>learned</code> event when the review finishes</td></tr>
+    <tr><td><code>POST /stop</code></td><td>204, empty</td><td>The running reply ends with <code>done</code></td></tr>
+    <tr><td><code>GET /api/models</code> · <code>/api/mcp</code> · <code>/api/composio</code> · <code>/api/usage?days=7</code> · <code>/api/bots/&lt;id&gt;</code></td><td>200 JSON</td><td>Read by React Query in dialogs</td></tr>
+    <tr><td>Settings writes: <code>/api/models/*</code>, <code>/api/mcp/*</code>, <code>/api/composio/*</code>, <code>/api/bots</code></td><td>200 JSON, e.g. <code>{"saved":true}</code></td><td>The dialog refetches</td></tr>
+    <tr><td>Anything that fails</td><td><code>{"error":"words for the user"}</code></td><td>400 bad input · 403 not local · 404 · 409 busy · 413 over 32 KB · 415 not JSON · 500</td></tr>
+  </table></div>
+
+  <h3>2 · The SSE stream (<code>GET /events</code>)</h3>
+  <p class="muted small">One long-lived connection per tab. It sends a snapshot first, then events as they happen. These eight event types are the whole live contract (<code>http/events.ts</code> ↔ <code>web/src/api/wire.ts</code>).</p>
+  <pre><code>: connected
+data: {"type":"snapshot","session":"8f2c…","messages":[{"role":"user","text":"…","streaming":false}],
+       "replying":false,"model":"openai/gpt-6.1-sol","bot":"default","bots":[…],"appearance":{…}}
+data: {"type":"user","text":"Draft an opener for Acme","session":"8f2c…"}
+data: {"type":"tool","name":"knowledge_search"}
+data: {"type":"text","delta":"Here's "}
+data: {"type":"text","delta":"a draft…"}
+data: {"type":"done"}
+data: {"type":"bots","bots":[{"id":"default","name":"Personal agent","lastMessage":"Here's a draft…",…}]}
+data: {"type":"learned","bot":"default","changes":["memory: Rishabh prefers short openers"]}
+data: {"type":"error","message":"Credentials are missing, expired, or lack model access. Reconnect…"}</code></pre>
+
+  <h3>3 · The model's message (what gets saved)</h3>
+  <p class="muted small">pi-ai turns every provider's answer into one shape. That shape is stored as JSON in <code>messages.message</code>, which is why any model can continue any conversation.</p>
+  <pre><code>{
+  <span class="s">"role"</span>: <span class="s">"assistant"</span>,
+  <span class="s">"content"</span>: [
+    { <span class="s">"type"</span>: <span class="s">"thinking"</span>, <span class="s">"thinking"</span>: <span class="s">"…"</span> },
+    { <span class="s">"type"</span>: <span class="s">"text"</span>, <span class="s">"text"</span>: <span class="s">"Here's a draft…"</span> },
+    { <span class="s">"type"</span>: <span class="s">"toolCall"</span>, <span class="s">"id"</span>: <span class="s">"call_1"</span>, <span class="s">"name"</span>: <span class="s">"memory"</span>, <span class="s">"arguments"</span>: { … } }
+  ],
+  <span class="s">"provider"</span>: <span class="s">"openai"</span>, <span class="s">"model"</span>: <span class="s">"gpt-6.1-sol"</span>,
+  <span class="s">"usage"</span>: { <span class="s">"input"</span>: 5120, <span class="s">"output"</span>: 340, <span class="s">"cacheRead"</span>: 4096, <span class="s">"cacheWrite"</span>: 0, <span class="s">"cost"</span>: { <span class="s">"total"</span>: 0.0123, … } },
+  <span class="s">"stopReason"</span>: <span class="s">"toolUse"</span>   <span class="c">// or "stop" · "length" · "error" · "aborted"</span>
+}</code></pre>
+  <p class="muted small">The numbers above are illustrative. A <code>user</code> message is <code>{role, content, timestamp}</code>. A <code>toolResult</code> message carries <code>toolName</code>, <code>content</code> and <code>details</code>; <code>details.externalResult: true</code> marks outside data.</p>
+</section>
+
+<!-- 9 -->
+<section id="saving">
+  <div class="eyebrow">09 · DATA IN MOTION</div>
+  <h2>How data is sent and saved</h2>
+  <p class="lede">The browser has one way to read the chat and one way to write. The daemon has three places to save, and each piece of data has exactly one.</p>
+
+  <h3>Sending: browser → daemon</h3>
+  <div class="flow">
+    <div class="step"><b>Chat reads</b><span>One <code>EventSource('/events')</code> opened in <code>main.tsx</code>. Never restarted by React.</span><span class="file">api/live.ts</span></div>
+    <div class="step"><b>Chat state</b><span>A pure reducer turns events into the transcript. It's the only owner of the chat.</span><span class="file">api/live-state.ts</span></div>
+    <div class="step"><b>All writes</b><span>Plain <code>fetch</code> POST with JSON. One write at a time (a single "pending" slot).</span><span class="file">api/post.ts</span></div>
+    <div class="step"><b>Settings reads</b><span>React Query GETs. Models polls every 1 s, MCP every 1.5 s. Writes never enter a cache.</span><span class="file">api/queries.ts</span></div>
+  </div>
+  <div class="flow">
+    <div class="step"><b>Host check</b><span>Host must be <code>localhost</code> or <code>127.0.0.1</code> on this port</span></div><span class="arrow">→</span>
+    <div class="step"><b>Origin check</b><span>Same origin only, so other websites can't post</span></div><span class="arrow">→</span>
+    <div class="step"><b>Body check</b><span><code>application/json</code>, ≤ 32 KB</span></div><span class="arrow">→</span>
+    <div class="step"><b>Schema check</b><span>TypeBox, no extra fields allowed</span><span class="file">http/validation.ts</span></div>
+  </div>
+
+  <h3>Saving: daemon → disk</h3>
+  <div class="cards">
+    <div class="card disk"><span class="tag db">SQLite</span><h4 style="margin-top:8px">sessions.db</h4><p>Conversations, review progress, model calls and costs.</p><p><b>Why:</b> there are lots of small appends, it needs full-text search, and nobody edits it by hand.</p><p class="file">sessions.ts · not in git</p></div>
+    <div class="card disk"><span class="tag git">Markdown + git</span><h4 style="margin-top:8px">bots, memory, skills, wiki</h4><p>What the agent <em>is</em> and what it learned.</p><p><b>Why:</b> you can read and edit it, and each write is a commit with its reason, so you can audit or undo it.</p><p class="file">bots.ts · learning/*.ts</p></div>
+    <div class="card disk"><span class="tag private">private JSON</span><h4 style="margin-top:8px">logins and settings</h4><p><code>auth.json</code>, <code>model-settings.json</code>, <code>mcp-*.json</code>, <code>composio.json</code>.</p><p><b>Why:</b> secrets. File mode 0600, written to a temp file then renamed, and listed in <code>.gitignore</code>.</p><p class="file">app-store.ts · models/registry.ts</p></div>
+  </div>
+
+  <h3>Two queues keep writes safe</h3>
+  <p class="muted">A chat reply and a background review can both try to save at the same moment. Two simple promise chains put them in line:</p>
+  <div class="cards two">
+    <div class="card"><h4>Learning write queue</h4><p>Each read-modify-write-commit of memory, skills, the wiki or a bot runs as one unit, one at a time. Two writers can't overwrite each other's edit.</p><p class="file">learning/writes.ts serializeLearningWrite()</p></div>
+    <div class="card"><h4>Commit queue</h4><p>Git allows one writer per repo. Commits run one after another, and a failed commit unstages its files so the next commit can't pick them up.</p><p class="file">home.ts commit()</p></div>
+  </div>
+  <pre><code><span class="c">// learning/writes.ts: the whole queue. Each operation waits for the one before it.</span>
+<span class="k">let</span> writeQueue: Promise&lt;unknown&gt; = Promise.resolve();
+<span class="k">export function</span> serializeLearningWrite&lt;T&gt;(operation: () =&gt; Promise&lt;T&gt;): Promise&lt;T&gt; {
+  <span class="k">const</span> next = writeQueue.then(operation);
+  writeQueue = next.catch(() =&gt; <span class="k">undefined</span>);   <span class="c">// one failure doesn't block the line</span>
+  <span class="k">return</span> next;
+}</code></pre>
+</section>
+
+<!-- 10 -->
+<section id="tables">
+  <div class="eyebrow">10 · THE DATABASE</div>
+  <h2>The tables in <code>sessions.db</code></h2>
+  <p class="lede">There's one SQLite file at <code>~/.personal-agent/sessions.db</code>, opened with Node's built-in <code>node:sqlite</code>. It has no ORM and no migration tool: the schema is a string in <code>sessions.ts</code>.</p>
+  <div class="diagram">
+  <svg viewBox="0 0 960 510" role="img" aria-label="Entity diagram: sessions has many messages, one reviews row and many model_calls; messages_fts indexes messages text">
+    <!-- sessions -->
+    <rect x="20" y="30" width="250" height="140" rx="10" class="n-table"/>
+    <text x="34" y="54" class="t tc-disk">sessions</text>
+    <text x="118" y="54" class="s">one per conversation</text>
+    <line x1="20" y1="64" x2="270" y2="64" class="sep"/>
+    <text x="34" y="86" class="m-ink">id</text><text x="128" y="86" class="s">TEXT · PK (uuid)</text>
+    <text x="34" y="110" class="m-ink">started_at</text><text x="128" y="110" class="s">INTEGER · ms</text>
+    <text x="34" y="134" class="m-ink">bot_id</text><text x="128" y="134" class="s">TEXT · 'default'</text>
+    <text x="34" y="158" class="m-ink">opened_at</text><text x="128" y="158" class="s">INTEGER · last open</text>
+    <!-- messages -->
+    <rect x="355" y="20" width="270" height="188" rx="10" class="n-table"/>
+    <text x="369" y="44" class="t tc-disk">messages</text>
+    <text x="458" y="44" class="s">every message</text>
+    <line x1="355" y1="54" x2="625" y2="54" class="sep"/>
+    <text x="369" y="76" class="m-ink">id</text><text x="465" y="76" class="s">INTEGER · PK</text>
+    <text x="369" y="100" class="m-ink">session_id</text><text x="465" y="100" class="s">→ sessions.id</text>
+    <text x="369" y="124" class="m-ink">role</text><text x="465" y="124" class="s">TEXT · 4 roles</text>
+    <text x="369" y="148" class="m-ink">text</text><text x="465" y="148" class="s">TEXT · plain text</text>
+    <text x="369" y="172" class="m-ink">message</text><text x="465" y="172" class="s">TEXT · full JSON</text>
+    <text x="369" y="196" class="m-ink">created_at</text><text x="465" y="196" class="s">INTEGER · ms</text>
+    <!-- fts -->
+    <rect x="715" y="40" width="225" height="96" rx="10" class="n-table"/>
+    <text x="729" y="64" class="t tc-disk">messages_fts</text>
+    <text x="840" y="64" class="s">FTS5 index</text>
+    <line x1="715" y1="74" x2="940" y2="74" class="sep"/>
+    <text x="729" y="96" class="m-ink">text</text><text x="790" y="96" class="s">copy of messages.text</text>
+    <text x="729" y="120" class="m-ink">rowid</text><text x="790" y="120" class="s">= messages.id</text>
+    <!-- reviews -->
+    <rect x="20" y="250" width="250" height="140" rx="10" class="n-table"/>
+    <text x="34" y="274" class="t tc-disk">reviews</text>
+    <text x="104" y="274" class="s">how far reviews got</text>
+    <line x1="20" y1="284" x2="270" y2="284" class="sep"/>
+    <text x="34" y="306" class="m-ink">session_id</text><text x="150" y="306" class="s">PK → sessions</text>
+    <text x="34" y="330" class="m-ink">through_message</text><text x="150" y="330" class="s">knowledge mark</text>
+    <text x="34" y="354" class="m-ink">memory_through</text><text x="150" y="354" class="s">memory mark</text>
+    <text x="34" y="378" class="m-ink">skills_through</text><text x="150" y="378" class="s">skills mark</text>
+    <!-- model_calls -->
+    <rect x="355" y="262" width="300" height="236" rx="10" class="n-table"/>
+    <text x="369" y="286" class="t tc-disk">model_calls</text>
+    <text x="466" y="286" class="s">one per model call</text>
+    <line x1="355" y1="296" x2="655" y2="296" class="sep"/>
+    <text x="369" y="318" class="m-ink">id</text><text x="535" y="318" class="s">INTEGER · PK</text>
+    <text x="369" y="342" class="m-ink">session_id</text><text x="535" y="342" class="s">→ sessions.id</text>
+    <text x="369" y="366" class="m-ink">kind</text><text x="535" y="366" class="s">reply | review</text>
+    <text x="369" y="390" class="m-ink">provider, model</text><text x="535" y="390" class="s">TEXT</text>
+    <text x="369" y="414" class="m-ink">input, output</text><text x="535" y="414" class="s">tokens</text>
+    <text x="369" y="438" class="m-ink">cache_read, cache_write</text><text x="535" y="438" class="s">tokens</text>
+    <text x="369" y="462" class="m-ink">cost</text><text x="535" y="462" class="s">REAL · USD est.</text>
+    <text x="369" y="486" class="m-ink">created_at</text><text x="535" y="486" class="s">INTEGER · ms</text>
+    <!-- relations -->
+    <line x1="270" y1="86" x2="351" y2="86" class="a-disk" marker-end="url(#ah-disk)"/>
+    <text x="280" y="78" class="lbl">1 → many</text>
+    <line x1="625" y1="96" x2="711" y2="96" class="a-disk dash" marker-end="url(#ah-disk)"/>
+    <text x="634" y="116" class="lbl">trigger</text>
+    <text x="634" y="131" class="lbl">on insert</text>
+    <line x1="145" y1="170" x2="145" y2="246" class="a-disk" marker-end="url(#ah-disk)"/>
+    <text x="154" y="214" class="lbl">1 → 0 or 1</text>
+    <path d="M270,150 L312,150 L312,330 L351,330" class="a-disk" marker-end="url(#ah-disk)"/>
+    <text x="318" y="245" class="lbl">1 → many</text>
+  </svg>
+  </div>
+
+  <h3>Every column</h3>
+  <div class="grid2">
+    <div>
+      <div class="table-wrap"><table>
+        <tr><th colspan="3"><span class="tname">sessions</span> · one row per conversation</th></tr>
+        <tr><td><code>id</code></td><td>TEXT PK</td><td>A UUID made by <code>new Conversation()</code></td></tr>
+        <tr><td><code>started_at</code></td><td>INTEGER</td><td>Epoch ms</td></tr>
+        <tr><td><code>bot_id</code></td><td>TEXT</td><td>Which bot owns it. Default <code>'default'</code>. Every read is filtered by it, so bots can't see each other's chats</td></tr>
+        <tr><td><code>opened_at</code></td><td>INTEGER</td><td>Last time you opened it. Picks the conversation a restart returns to</td></tr>
+      </table></div>
+      <div class="table-wrap"><table>
+        <tr><th colspan="3"><span class="tname">reviews</span> · review progress per conversation</th></tr>
+        <tr><td><code>session_id</code></td><td>TEXT PK</td><td>→ <code>sessions.id</code></td></tr>
+        <tr><td><code>through_message</code></td><td>INTEGER</td><td>Last <code>messages.id</code> a knowledge review covered</td></tr>
+        <tr><td><code>memory_through</code></td><td>INTEGER</td><td>Same, for memory reviews</td></tr>
+        <tr><td><code>skills_through</code></td><td>INTEGER</td><td>Same, for skill reviews</td></tr>
+      </table></div>
+      <p class="muted small">Marks only move forward (<code>max(old, new)</code>), so a review never re-learns from messages it already saw.</p>
+    </div>
+    <div>
+      <div class="table-wrap"><table>
+        <tr><th colspan="3"><span class="tname">messages</span> · every message, in order</th></tr>
+        <tr><td><code>id</code></td><td>INTEGER PK</td><td>A stable id. Wiki citations point at it</td></tr>
+        <tr><td><code>session_id</code></td><td>TEXT</td><td>→ <code>sessions.id</code></td></tr>
+        <tr><td><code>role</code></td><td>TEXT</td><td><code>system</code> · <code>user</code> · <code>assistant</code> · <code>toolResult</code></td></tr>
+        <tr><td><code>text</code></td><td>TEXT</td><td>Only the text parts, for search. Empty for system and tool-only rows</td></tr>
+        <tr><td><code>message</code></td><td>TEXT</td><td>The full pi-ai message as JSON. Parsed back on resume</td></tr>
+        <tr><td><code>created_at</code></td><td>INTEGER</td><td>Epoch ms</td></tr>
+      </table></div>
+      <div class="table-wrap"><table>
+        <tr><th colspan="3"><span class="tname">model_calls</span> · usage and cost</th></tr>
+        <tr><td><code>kind</code></td><td>TEXT</td><td><code>reply</code> (chat) or <code>review</code> (background). A CHECK constraint enforces it</td></tr>
+        <tr><td><code>provider</code>, <code>model</code></td><td>TEXT</td><td>e.g. <code>openai</code>, <code>gpt-6.1-sol</code></td></tr>
+        <tr><td><code>input</code> … <code>cache_write</code></td><td>INTEGER</td><td>Token counts. Calls with zero tokens are skipped</td></tr>
+        <tr><td><code>cost</code></td><td>REAL</td><td>pi-ai's estimate at API prices, not a bill</td></tr>
+      </table></div>
+    </div>
+  </div>
+  <div class="table-wrap"><table>
+    <tr><th colspan="2"><span class="tname">messages_fts</span> · the search index</th></tr>
+    <tr><td><code>CREATE VIRTUAL TABLE … USING fts5(text, content='messages', content_rowid='id')</code></td><td>A full-text index over <code>messages.text</code>. The trigger <code>messages_fts_insert</code> copies each new row in. <code>session_search</code> queries it with <code>MATCH</code>, ranks by <code>bm25</code>, and returns 8 hits. Plus one normal index: <code>messages_session(session_id, created_at)</code>.</td></tr>
+  </table></div>
+
+  <h3>One short chat, as rows</h3>
+  <div class="table-wrap"><table>
+    <tr><th>messages.id</th><th>role</th><th>text</th><th>message (JSON, trimmed)</th></tr>
+    <tr><td>101</td><td>system</td><td class="muted">""</td><td><code>{"role":"system", …system prompt + tool declarations}</code></td></tr>
+    <tr><td>102</td><td>user</td><td>Draft an opener for Acme</td><td><code>{"role":"user","content":[{"type":"text",…}]}</code></td></tr>
+    <tr><td>103</td><td>assistant</td><td class="muted">""</td><td><code>{"content":[{"type":"toolCall","name":"knowledge_search",…}]}</code></td></tr>
+    <tr><td>104</td><td>toolResult</td><td>pages/acme.md: …</td><td><code>{"toolName":"knowledge_search",…}</code></td></tr>
+    <tr><td>105</td><td>assistant</td><td>Here's a draft…</td><td><code>{"content":[{"type":"text",…}],"usage":{…}}</code></td></tr>
+  </table></div>
+  <p class="muted small">Messages 103 and 105 were two model calls, so <code>model_calls</code> gets two <code>reply</code> rows. The first row of every conversation is the system message. That's why reopening a conversation restores its original instructions.</p>
+
+  <h3>How the schema changes over time</h3>
+  <pre><code><span class="c">// sessions.ts constructor: create what's missing, then add any missing columns.</span>
+<span class="k">this</span>.db.exec(SCHEMA);                                   <span class="c">// CREATE TABLE IF NOT EXISTS …</span>
+<span class="k">if</span> (!has(<span class="s">"sessions"</span>, <span class="s">"bot_id"</span>))
+  <span class="k">this</span>.db.exec(<span class="s">"ALTER TABLE sessions ADD COLUMN bot_id TEXT NOT NULL DEFAULT 'default'"</span>);
+<span class="k">if</span> (!has(<span class="s">"reviews"</span>, <span class="s">"memory_through"</span>)) <span class="c">/* add memory_through + skills_through, copy the old mark */</span></code></pre>
+  <div class="callout disk"><b>Two more things to know</b>1. The wiki's search also uses SQLite, but as a throwaway <code>:memory:</code> FTS index rebuilt from the Markdown on every search. Nothing is saved, so edits and git reverts show up immediately.<br>2. The plan on this branch (<code>docs/plans/learning-kinds.md</code>) proposes replacing the three mark columns with a <code>review_marks</code> table. It isn't built yet.</div>
+</section>
+
+<!-- 11 -->
+<section id="files">
+  <div class="eyebrow">11 · THE REST OF THE DATA</div>
+  <h2>The home folder, file by file</h2>
+  <p class="lede"><code>~/.personal-agent</code> is its own local git repo. It has no remote, by decision. Green files are committed on every change. Pink files are private and never committed.</p>
+  <div class="tree"><span class="d">~/.personal-agent/</span>
+├── <span class="d">bots/</span>
+│   └── <span class="d">&lt;id&gt;/</span>
+│       ├── bot.md              <span class="tag git">git</span> <span class="x">name, description, colour, shape + instructions</span>
+│       └── MEMORY.md           <span class="tag git">git</span> <span class="x">this bot's notes · cap 2,200 chars</span>
+├── <span class="d">memory/</span>USER.md          <span class="tag git">git</span> <span class="x">who Rishabh is · shared by all bots · cap 1,375 chars</span>
+├── <span class="d">skills/</span>&lt;name&gt;/SKILL.md  <span class="tag git">git</span> <span class="x">+ optional references/ templates/ scripts/ assets/</span>
+├── <span class="d">wiki/</span>                   <span class="tag git">git</span> <span class="x">or AGENT_KNOWLEDGE_ROOT</span>
+│   ├── pages/&lt;id&gt;.md       <span class="x">claims with sources</span>
+│   ├── sources/&lt;hash&gt;.md   <span class="x">snapshots of quoted originals</span>
+│   ├── raw/                <span class="x">your documents, usable as evidence</span>
+│   ├── index.md            <span class="x">catalog</span>
+│   └── log.md              <span class="x">change log</span>
+├── sessions.db             <span class="tag db">SQLite</span> <span class="tag plain">ignored</span>
+├── auth.json               <span class="tag private">0600</span> <span class="x">model logins</span>
+├── model-settings.json     <span class="tag private">0600</span> <span class="x">default model</span>
+├── mcp-settings.json       <span class="tag private">0600</span> <span class="x">MCP server definitions + ticked tools</span>
+├── mcp-credentials.json    <span class="tag private">0600</span> <span class="x">MCP secrets + OAuth tokens</span>
+├── composio.json           <span class="tag private">0600</span> <span class="x">Composio key + labelled accounts</span>
+├── device-id               <span class="tag private">0600</span> <span class="x">a UUID OpenAI sign-in expects</span>
+├── <span class="d">media/</span>&lt;sha256&gt;.png      <span class="tag plain">ignored</span> <span class="x">images from MCP tools</span>
+└── .git/                   <span class="x">the agent's own history</span></div>
+
+  <h3>The schema of each file</h3>
+  <div class="grid2">
+    <div class="schema">
+      <h4>bots/&lt;id&gt;/bot.md</h4>
+      <p>Frontmatter, then the bot's instructions (up to 24,000 chars). The id is the folder name. Missing colour or shape get a stable default from a hash of the id.</p>
+<pre><code>---
+name: "Coder"                 <span class="c"># ≤ 60 chars, one line</span>
+description: "Helps with code"  <span class="c"># ≤ 200 chars</span>
+color: "teal"     <span class="c"># slate clay ochre moss teal indigo plum rose</span>
+shape: "hexagon"  <span class="c"># circle squircle hexagon diamond shield arch</span>
+---
+You help Rishabh write and review TypeScript.</code></pre>
+    </div>
+    <div class="schema">
+      <h4>memory/USER.md · bots/&lt;id&gt;/MEMORY.md</h4>
+      <p>A list of entries separated by a <code>§</code> line. A save that goes over the cap is refused, and the agent has to merge or remove entries first.</p>
+<pre><code>Rishabh builds AI SaaS products end to end.
+§
+Rishabh prefers short, direct replies.
+§
+Rishabh's outreach runs through Threadlane.</code></pre>
+    </div>
+    <div class="schema">
+      <h4>skills/&lt;name&gt;/SKILL.md</h4>
+      <p>Only the name and the first 60 characters of the description go into the prompt. The agent loads the full skill with <code>skill_view</code> when it's relevant.</p>
+<pre><code>---
+name: cold-outreach
+description: Writing first messages to leads …
+---
+1. Read the lead's page first.
+2. …</code></pre>
+    </div>
+    <div class="schema">
+      <h4>wiki/pages/&lt;id&gt;.md</h4>
+      <p>Structured claims in YAML frontmatter, a rendered copy between marker comments, then a <code>## Notes</code> section that's yours to edit.</p>
+<pre><code>id: acme
+title: Acme Corp
+aliases: [Acme]
+links: [pricing]
+updatedAt: 2026-11-09T…
+claims:
+  - id: 3b1f…
+    text: Acme wants to launch in March.
+    status: supported   <span class="c"># inference · unresolved · superseded</span>
+    observedAt: …
+    sources:
+      - path: sources/9c2e….md
+        reference: conversation 8f2c…, message 102
+        quote: "we need it live by March"
+        origin: owner     <span class="c"># or external</span></code></pre>
+    </div>
+    <div class="schema">
+      <h4>auth.json</h4>
+      <p>One credential per provider, read and refreshed by pi-ai. Reconnecting repairs a corrupt file and keeps the old bytes in <code>auth.json.&lt;uuid&gt;.bak</code>.</p>
+<pre><code>{
+  "openai":    { "type": "oauth", "access": "…", "refresh": "…", "expires": 1762… },
+  "anthropic": { "type": "api_key", "key": "sk-ant-…" }
+}</code></pre>
+      <h4 style="margin-top:14px">model-settings.json</h4>
+<pre><code>{ "model": "openai/gpt-6.1-sol" }   <span class="c">// AGENT_MODEL env wins over it</span></code></pre>
+    </div>
+    <div class="schema">
+      <h4>mcp-settings.json</h4>
+      <p>An array of server definitions. <code>tools</code> lists the tools you ticked. Nothing is ticked by default.</p>
+<pre><code>[{ "id": "notes", "name": "Notes", "enabled": true,
+   "tools": ["search_notes"], "timeoutMs": 60000, "connectTimeoutMs": 10000,
+   "transport": "http",        <span class="c">// or "sse"</span>
+   "url": "https://…", "auth": "oauth", "headers": {} },
+ { "id": "files", …, "transport": "stdio",
+   "command": "/usr/local/bin/x", "args": [], "cwd": "", "env": {} }]</code></pre>
+      <h4 style="margin-top:14px">mcp-credentials.json</h4>
+<pre><code>{ "notes": { "secrets": {}, "tokens": { "access_token": "…", "token_type": "Bearer" },
+             "client": { "client_id": "…" }, "redirectUri": "…" } }</code></pre>
+    </div>
+    <div class="schema">
+      <h4>composio.json</h4>
+      <p>Provider tokens stay at Composio. Only account ids and their labels are saved here. <code>COMPOSIO_API_KEY</code> in the environment overrides the saved key.</p>
+<pre><code>{ "apiKey": "…",
+  "userId": "personal-agent-&lt;uuid&gt;",
+  "accounts": [{ "id": "ca_…", "toolkit": "gmail",
+                 "label": "My Gmail", "tools": ["GMAIL_SEND_EMAIL"] }] }</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- 12 -->
+<section id="tools">
+  <div class="eyebrow">12 · HANDS</div>
+  <h2>Tools: one shape, three sources</h2>
+  <p class="lede">Every tool, built-in or external, has the same four fields. The model sees the name, description and parameters. Only the daemon runs <code>execute</code>.</p>
+  <pre><code><span class="c">// The AgentTool shape (vendor/pi-core/types.ts), shown with the session_search tool</span>
+{
+  name: <span class="s">"session_search"</span>,
+  description: <span class="s">"Search your past conversations with Rishabh…"</span>,  <span class="c">// tells the model when to use it</span>
+  parameters: Type.Object({ query: Type.String() }),             <span class="c">// TypeBox → JSON Schema</span>
+  <span class="k">async</span> execute(callId, params) {                                  <span class="c">// runs on your Mac</span>
+    <span class="k">return</span> { content: [{ type: <span class="s">"text"</span>, text: <span class="s">"…hits…"</span> }], details: { externalResult: <span class="k">false</span> } };
+  },
+}</code></pre>
+  <div class="flow">
+    <div class="step"><b>Built-in learning tools</b><span>memory, skills, wiki, session search</span><span class="file">Conversation.tools()</span></div><span class="arrow">+</span>
+    <div class="step"><b>MCP tools</b><span>only the ones you ticked, from connected servers</span><span class="file">mcp.tools()</span></div><span class="arrow">+</span>
+    <div class="step"><b>Composio tools</b><span>ticked tools, each with an <code>account</code> parameter</span><span class="file">composio.tools()</span></div><span class="arrow">=</span>
+    <div class="step" style="border-color:var(--loop)"><b>agent.state.tools</b><span>rebuilt before every message you send</span><span class="file">conversation.ts reply()</span></div>
+  </div>
+  <div class="table-wrap"><table>
+    <tr><th>Tool name</th><th>What it does</th><th>Where it saves</th></tr>
+    <tr><td><code>memory</code></td><td>Add, replace or remove entries in USER.md or this bot's MEMORY.md</td><td>Markdown + a commit like <code>memory(default): …</code></td></tr>
+    <tr><td><code>skills_list</code> · <code>skill_view</code> · <code>skill_manage</code></td><td>List, read, create and patch skills. A file must be viewed before it can be edited</td><td><code>skills/&lt;name&gt;/</code> + commit</td></tr>
+    <tr><td><code>knowledge_search</code> · <code>_read</code> · <code>_update</code> · <code>_lint</code></td><td>Search and read the wiki, save claims with quoted sources, and check for gaps</td><td><code>wiki/</code> + a commit like <code>knowledge: …</code></td></tr>
+    <tr><td><code>session_search</code> · <code>session_read</code></td><td>Search and read this bot's past conversations</td><td>Read-only, from <code>sessions.db</code></td></tr>
+    <tr><td><code>mcp_&lt;server&gt;_&lt;hash&gt;</code></td><td>Whatever that MCP server does. Names are hashed to fit provider limits</td><td>Outside. Images go to <code>media/</code></td></tr>
+    <tr><td><code>composio_&lt;slug&gt;</code></td><td>One app action, through the labelled account you name</td><td>Outside, at Composio</td></tr>
+  </table></div>
+  <h3>Three safety rails</h3>
+  <div class="cards">
+    <div class="card ext"><h4>1 · No saving after outside data</h4><p>Once an outside result arrives in a turn (an app, recalled text or a wiki page), <code>memory</code> and <code>skill_manage</code> are blocked until your next message. This guards against prompt injection.</p><p class="file">conversation.ts beforeToolCall</p></div>
+    <div class="card ext"><h4>2 · Reviews must quote you</h4><p>A background change needs at least 3 words quoted from <em>your</em> new messages. Wiki changes may quote outside results.</p><p class="file">review.ts beforeToolCall</p></div>
+    <div class="card ext"><h4>3 · Automatic means add-only</h4><p>A review it starts on its own can add memories, but it can't replace or remove them, and it can't supersede a wiki claim. Only you can.</p><p class="file">memory.ts addOnly</p></div>
+  </div>
+</section>
+
+<!-- 13 -->
+<section id="learning">
+  <div class="eyebrow">13 · GETTING BETTER</div>
+  <h2>How it learns: the background review</h2>
+  <p class="lede">After the reply, a copy of the conversation is asked what's worth keeping. It runs in the background, so you never wait for it.</p>
+  <div class="flow">
+    <div class="step"><b>1 · Trigger</b><span>10 messages from you → memory review. 10 model calls → skill review. <em>Review now</em> → both. A save made in chat resets its counter.</span><span class="file">conversation.ts</span></div><span class="arrow">→</span>
+    <div class="step"><b>2 · Fork</b><span>A new <code>Agent</code> with the same model, messages and tool declarations (so the prompt cache still hits), but only local learning tools work.</span><span class="file">review.ts runReview()</span></div><span class="arrow">→</span>
+    <div class="step"><b>3 · Ask</b><span>Hermes's review prompt + "learn only from the new part" + the quote rule. At most 16 model calls.</span><span class="file">review-prompts.ts</span></div><span class="arrow">→</span>
+    <div class="step"><b>4 · Save</b><span>Each change goes through the write queue and gets a git commit with its reason.</span><span class="file">writes.ts · home.ts</span></div><span class="arrow">→</span>
+    <div class="step"><b>5 · Report</b><span>SSE <code>learned</code> shows what changed. Marks move forward in <code>reviews</code>, and costs land in <code>model_calls</code> as <code>review</code>.</span><span class="file">registry.ts announce()</span></div>
+  </div>
+  <div class="callout loop"><b>Where each kind of learning goes</b><b style="display:inline">Memory:</b> facts true in every conversation (who you are, setup). <b style="display:inline">Skills:</b> how to do a kind of task. <b style="display:inline">Wiki:</b> knowledge about projects, people and decisions, with sources. <b style="display:inline">Conversations:</b> everything else, searchable later.</div>
+  <h3>What the model sees at the start of a conversation</h3>
+  <pre><code><span class="c">// conversations/prompt.ts buildSystemPrompt(): the parts that change least come first, so caching works</span>
+[
+  bot.instructions,          <span class="c">// bots/&lt;id&gt;/bot.md body</span>
+  CAPABILITIES,              <span class="c">// "You are early in development…"</span>
+  MEMORY_GUIDANCE,           <span class="c">// when to use memory vs skills vs session_search</span>
+  KNOWLEDGE_GUIDANCE,        <span class="c">// how to use and cite the wiki</span>
+  bot.memory.promptBlock(),  <span class="c">// USER.md + MEMORY.md, as they were at the start</span>
+  skills.promptIndex(),      <span class="c">// "- cold-outreach: Writing first messages…"</span>
+  <span class="s">`Conversation started: ${date} (${zone}).`</span>,
+].join(<span class="s">"\n\n"</span>)</code></pre>
+</section>
+
+<!-- 14 -->
+<section id="web">
+  <div class="eyebrow">14 · THE FACE</div>
+  <h2>The web page</h2>
+  <p class="lede">One React shell that stays mounted for the life of the tab. Dialogs open over the chat, so the stream and your draft are never lost.</p>
+  <div class="cards">
+    <div class="card web"><h4>The server's snapshot owns…</h4><p>the active bot, the session, the transcript, and "replying".</p><p class="file">api/live-state.ts (pure reducer)</p></div>
+    <div class="card web"><h4>The URL owns…</h4><p>which dialog or panel is open: <code>?settings=models</code>, <code>?settings=usage</code>, <code>?mcp</code>, <code>?connections</code>, <code>?details</code>, <code>?create</code>, <code>?bots</code>. It never names a bot.</p><p class="file">shell/location.ts</p></div>
+    <div class="card web"><h4>Components own…</h4><p>form edits and the chat draft (kept per bot in sessionStorage).</p><p class="file">shell/composer.tsx · dialogs</p></div>
+  </div>
+  <div class="flow">
+    <div class="step"><b>main.tsx</b><span><code>live.connect()</code> opens the stream once, then renders <code>&lt;Shell/&gt;</code></span></div><span class="arrow">→</span>
+    <div class="step"><b>shell.tsx</b><span>NoticeBar · BotSidebar · ChatHeader · Transcript · Composer · BotPanel</span></div><span class="arrow">→</span>
+    <div class="step"><b>Overlays</b><span>SettingsDialog (models, usage) · McpDialog · ConnectionsDialog · CreateBotDialog</span></div>
+  </div>
+  <h3>The UI kit</h3>
+  <div class="table-wrap"><table>
+    <tr><td><code>styles/tokens.css</code></td><td>Every colour as a CSS variable (<code>--background</code>, <code>--primary</code>, <code>--chat-user</code> and others), with light and dark sets</td></tr>
+    <tr><td><code>styles/bot-colors.css</code></td><td>The 8 bot colours: slate, clay, ochre, moss, teal, indigo, plum, rose</td></tr>
+    <tr><td><code>components/ui/*</code></td><td>Button, Dialog, Input, Checkbox, Dropdown and others: shadcn-style wrappers on Base UI</td></tr>
+    <tr><td><code>scripts/lint/no-raw-hex-*.grit</code></td><td>A lint rule that bans raw hex colours in CSS and TSX. Use the tokens</td></tr>
+  </table></div>
+</section>
+
+<!-- 15 -->
+<section id="electron">
+  <div class="eyebrow">15 · WHAT IF</div>
+  <h2>What happens if we build an Electron app</h2>
+  <p class="lede">Very little changes. Electron is a Chromium window plus a Node process, and this app is already a web page served by a local Node server. The desktop app becomes a window pointed at <code>http://127.0.0.1:4545</code>.</p>
+  <p class="muted small">Nothing here is built. This is how the current design would take it.</p>
+  <div class="cards two">
+    <div class="card daemon">
+      <span class="tag plain">Step 1 · simplest</span>
+      <h4 style="margin-top:8px">Electron starts the daemon</h4>
+      <div class="stack" style="margin:10px 0">
+        <div class="layer web" style="grid-template-columns:1fr"><div class="name">BrowserWindow<small>loads http://127.0.0.1:4545 (the same React page)</small></div></div>
+        <div class="layer daemon" style="grid-template-columns:1fr"><div class="name">Electron main process<small>spawns `node apps/daemon/src/server.ts`, then SIGTERM on quit</small></div></div>
+        <div class="layer disk" style="grid-template-columns:1fr"><div class="name">~/.personal-agent<small>unchanged</small></div></div>
+      </div>
+      <p>Good for a first version. Quitting the app stops the agent.</p>
+    </div>
+    <div class="card loop">
+      <span class="tag plain">Step 2 · when it must run 24/7</span>
+      <h4 style="margin-top:8px">launchd runs the daemon, Electron is a window</h4>
+      <div class="stack" style="margin:10px 0">
+        <div class="layer web" style="grid-template-columns:1fr"><div class="name">Electron (menu bar + window)<small>attaches to the running daemon</small></div></div>
+        <div class="layer daemon" style="grid-template-columns:1fr"><div class="name">launchd service<small>the daemon, always on, as the PRD plans</small></div></div>
+        <div class="layer disk" style="grid-template-columns:1fr"><div class="name">~/.personal-agent<small>unchanged</small></div></div>
+      </div>
+      <p>Needed once WhatsApp and schedules arrive. Closing the window must not stop the agent.</p>
+    </div>
+  </div>
+
+  <h3>What stays the same and what needs care</h3>
+  <div class="table-wrap"><table>
+    <tr><th></th><th>Item</th><th>Why</th></tr>
+    <tr><td class="yes">Same</td><td>All of <code>apps/web</code></td><td>The window loads the same page from the same server</td></tr>
+    <tr><td class="yes">Same</td><td>All of <code>apps/daemon</code>, the HTTP/SSE contract, the home folder</td><td>The page sends <code>Host: 127.0.0.1:4545</code> and is same-origin, so <code>checkOrigin</code> passes unchanged</td></tr>
+    <tr><td class="yes">Same</td><td>Browser and terminal chat</td><td>They keep working next to the app, against the same daemon</td></tr>
+    <tr><td class="no">Care</td><td>One process per home</td><td>Use <code>app.requestSingleInstanceLock()</code>. If the port already answers, attach instead of starting a second daemon. Two daemons on one home means two writers</td></tr>
+    <tr><td class="no">Care</td><td>Which Node runs the daemon</td><td>It needs Node ≥ 24.12 (it runs <code>.ts</code> directly and uses <code>node:sqlite</code>). Spawning the system Node avoids this. Running it inside Electron's own Node needs a JS bundle and a check that its Node supports both</td></tr>
+    <tr><td class="no">Care</td><td>git must be installed</td><td>Every learning save runs the <code>git</code> CLI</td></tr>
+    <tr><td class="no">Care</td><td>Keep port 4545 fixed</td><td>The MCP OAuth redirect is <code>http://127.0.0.1:4545/api/mcp/oauth/callback</code>, and registered clients depend on it</td></tr>
+    <tr><td class="no">Care</td><td>Sign-in pages</td><td>Composio's Connect navigates the page itself, which works in the window. Popups should go to <code>shell.openExternal</code> so they use your real browser</td></tr>
+    <tr><td class="no">Care</td><td>Clean shutdown</td><td>Send SIGTERM. <code>server.ts</code> then stops the reply and reviews, saves, and closes SQLite</td></tr>
+    <tr><td class="no">Care</td><td>Security is unchanged</td><td>There's still no login. Keep it on loopback and never load remote pages in the window</td></tr>
+  </table></div>
+  <pre><code><span class="c">// apps/desktop/main.ts: a sketch, not in the repo (Step 1 with "attach if already running")</span>
+<span class="k">import</span> { app, BrowserWindow, shell } <span class="k">from</span> <span class="s">"electron"</span>;
+<span class="k">import</span> { spawn } <span class="k">from</span> <span class="s">"node:child_process"</span>;
+
+<span class="k">const</span> URL = <span class="s">"http://127.0.0.1:4545"</span>;
+<span class="k">if</span> (!app.requestSingleInstanceLock()) app.quit();          <span class="c">// one process per home</span>
+<span class="k">const</span> up = () =&gt; fetch(URL).then(() =&gt; <span class="k">true</span>, () =&gt; <span class="k">false</span>);
+
+app.whenReady().then(<span class="k">async</span> () =&gt; {
+  <span class="k">const</span> daemon = (<span class="k">await</span> up()) ? <span class="k">undefined</span>                       <span class="c">// already running: attach</span>
+    : spawn(<span class="s">"node"</span>, [<span class="s">"apps/daemon/src/server.ts"</span>], { stdio: <span class="s">"inherit"</span> });
+  <span class="k">while</span> (!(<span class="k">await</span> up())) <span class="k">await new</span> Promise((r) =&gt; setTimeout(r, 200));
+
+  <span class="k">const</span> win = <span class="k">new</span> BrowserWindow({ width: 1100, height: 760 });
+  win.webContents.setWindowOpenHandler(({ url }) =&gt; { shell.openExternal(url); <span class="k">return</span> { action: <span class="s">"deny"</span> }; });
+  <span class="k">await</span> win.loadURL(URL);
+  app.on(<span class="s">"before-quit"</span>, () =&gt; daemon?.kill(<span class="s">"SIGTERM"</span>));      <span class="c">// the daemon saves, then exits</span>
+});</code></pre>
+  <div class="callout ext"><b>The option to avoid</b>Replacing HTTP with Electron IPC. You'd rewrite <code>live.ts</code> and <code>post.ts</code> and maintain two contracts, and the browser, the HTTP journeys and the Playwright checks would no longer cover the desktop path. HTTP on loopback is already the boundary, so keep it.</div>
+</section>
+
+<!-- 16 -->
+<section id="work">
+  <div class="eyebrow">16 · DAY TO DAY</div>
+  <h2>How to work on it</h2>
+  <div class="grid2">
+    <div>
+      <h3 style="margin-top:0">Commands</h3>
+<pre><code>pnpm install
+pnpm serve                 <span class="c"># build the page + start the daemon on :4545</span>
+pnpm start --bot coder     <span class="c"># terminal chat · /new · /learn · /exit</span>
+pnpm login                 <span class="c"># ChatGPT sign-in from the terminal</span>
+pnpm check                 <span class="c"># biome + both TypeScript projects</span>
+pnpm test                  <span class="c"># daemon + web unit tests</span>
+pnpm test:journeys         <span class="c"># real server against the model emulator</span>
+pnpm verify                <span class="c"># run before calling anything done</span></code></pre>
+    </div>
+    <div>
+      <h3 style="margin-top:0">Never touch the real agent</h3>
+<pre><code><span class="c"># a throwaway home and port for every experiment</span>
+AGENT_HOME=/tmp/pa-dev PORT=4600 pnpm serve</code></pre>
+      <div class="callout ext"><b>Rules from AGENTS.md</b>Never drive port 4545 or touch <code>~/.personal-agent</code> while testing. For behaviour changes, follow <code>.agents/skills/verify-personal-agent</code>, and add a row to <code>docs/behaviors.md</code>.</div>
+    </div>
+  </div>
+  <h3>"I want to…" → the files to touch</h3>
+  <div class="table-wrap"><table>
+    <tr><th>I want to…</th><th>Touch</th></tr>
+    <tr><td>Change how one bot talks</td><td><code>bots/&lt;id&gt;/bot.md</code> in the home. No code</td></tr>
+    <tr><td>Change what every conversation is told</td><td><code>conversations/prompt.ts</code></td></tr>
+    <tr><td>Give it an outside ability</td><td>Add an MCP server or a Composio app first. That's configuration, not code</td></tr>
+    <tr><td>Add a built-in tool</td><td>Write an <code>AgentTool</code> in its owner module and add it in <code>Conversation.tools()</code>. If it saves, wrap it in <code>serializeLearningWrite</code> + <code>commit</code></td></tr>
+    <tr><td>Add an API endpoint</td><td><code>http/routes/&lt;area&gt;.ts</code> with a <code>body({…})</code> schema, spread into <code>routes</code> in <code>server.ts</code></td></tr>
+    <tr><td>Add a live event</td><td><code>http/events.ts</code> → <code>web/src/api/wire.ts</code> (+ <code>EVENT_TYPES</code>) → <code>live-state.ts</code>. <code>pnpm check</code> fails if they drift</td></tr>
+    <tr><td>Add a database column</td><td>The <code>SessionStore</code> constructor in <code>sessions.ts</code>: <code>has(table, column)</code> → <code>ALTER TABLE … DEFAULT …</code></td></tr>
+    <tr><td>Add a model provider</td><td><code>createAgentModels()</code> in <code>models/registry.ts</code>. The Models dialog reads its list from there</td></tr>
+    <tr><td>Add a dialog or panel</td><td>A URL param in <code>shell/location.ts</code> + a case in <code>Overlays</code> in <code>shell.tsx</code></td></tr>
+    <tr><td>Change colours</td><td><code>styles/tokens.css</code>. Never raw hex in components</td></tr>
+  </table></div>
+</section>
+
+<!-- 17 -->
+<section id="reading">
+  <div class="eyebrow">17 · THE 20%</div>
+  <h2>Read these 18 files, in this order</h2>
+  <p class="lede">About 2,490 of 12,619 lines (≈ 20%). After these, every other file is a feature plugged into the same parts.</p>
+
+  <div class="pass"><h3>Pass 1 · How it boots <span>≈ 390 lines</span></h3>
+  <div class="table-wrap"><table class="reading">
+    <tr><td><code>apps/daemon/src/server.ts</code> · 130</td><td>Startup order, the route table, OAuth callbacks, mapping errors to status codes, shutdown</td></tr>
+    <tr><td><code>apps/daemon/src/runtime.ts</code> · 31</td><td>The shared stores. Read it as the daemon's table of contents</td></tr>
+    <tr><td><code>apps/daemon/src/home.ts</code> · 227</td><td><code>openHome()</code> (folder, <code>.gitignore</code>, git init) and the <code>commit()</code> queue</td></tr>
+  </table></div></div>
+
+  <div class="pass"><h3>Pass 2 · One message <span>≈ 780 lines</span></h3>
+  <div class="table-wrap"><table class="reading">
+    <tr><td><code>http/routes/chat.ts</code> · 101</td><td><code>/messages</code>, <code>/open</code>, <code>/new</code>, <code>/stop</code>, <code>/learn</code></td></tr>
+    <tr><td><code>http/events.ts</code> · 42</td><td>SSE in 40 lines, plus every event type</td></tr>
+    <tr><td><code>conversations/registry.ts</code> · 135</td><td>One active conversation, the snapshot, loop events → SSE</td></tr>
+    <tr><td><code>conversations/conversation.ts</code> · 219</td><td><b>The heart.</b> Tools, saving, review triggers, the injection guard</td></tr>
+    <tr><td><code>conversations/prompt.ts</code> · 63</td><td>What the model reads first</td></tr>
+    <tr><td><code>vendor/pi-core/agent-loop.ts</code> · ~220 of 949</td><td>Only <code>runLoop()</code>, from line 163. Skip the rest on a first read</td></tr>
+  </table></div></div>
+
+  <div class="pass"><h3>Pass 3 · Storage <span>≈ 680 lines</span></h3>
+  <div class="table-wrap"><table class="reading">
+    <tr><td><code>sessions.ts</code> · 433</td><td>The schema, migrations, resume, search, usage, and the two session tools</td></tr>
+    <tr><td><code>app-store.ts</code> · 42</td><td>The private JSON pattern: schema-checked read, atomic 0600 write</td></tr>
+    <tr><td><code>bots.ts</code> · 208</td><td>The <code>bot.md</code> format, <code>open()</code> and <code>save()</code>, each bot's own stores</td></tr>
+  </table></div></div>
+
+  <div class="pass"><h3>Pass 4 · Learning <span>≈ 410 lines</span></h3>
+  <div class="table-wrap"><table class="reading">
+    <tr><td><code>learning/memory.ts</code> · 185</td><td>The simplest learning store. Skills and the wiki follow the same pattern</td></tr>
+    <tr><td><code>learning/review.ts</code> · 225</td><td>The background fork, the allowed tools, the quote rule</td></tr>
+  </table></div></div>
+
+  <div class="pass"><h3>Pass 5 · The page <span>≈ 230 lines</span></h3>
+  <div class="table-wrap"><table class="reading">
+    <tr><td><code>apps/web/src/main.tsx</code> · 23</td><td>One stream, one mounted shell</td></tr>
+    <tr><td><code>apps/web/src/api/live.ts</code> · 82</td><td>The EventSource and every chat write</td></tr>
+    <tr><td><code>apps/web/src/api/wire.ts</code> · 62</td><td>The daemon's JSON as the web sees it</td></tr>
+    <tr><td><code>apps/web/src/shell/shell.tsx</code> · 60</td><td>The layout and which dialog shows when</td></tr>
+  </table></div></div>
+
+  <div class="callout"><b>Safe to skip on a first read</b><code>mcp/adapter.ts</code> (556 lines), <code>learning/knowledge.ts</code> (626), <code>learning/skills.ts</code>, <code>models/setup.ts</code>, <code>composio/*</code>, the settings, MCP and connections dialogs, and <code>components/ui/*</code>. Each is a feature that plugs into the tool list, a route, or a dialog you've already seen.</div>
+
+  <h3>Words you'll see in the code</h3>
+  <div class="table-wrap"><table>
+    <tr><td><b>Home</b></td><td>The agent's folder (<code>AGENT_HOME</code>): Markdown repo + private JSON + <code>sessions.db</code></td></tr>
+    <tr><td><b>Bot</b></td><td>Instructions + private memory and history inside one home. Login, skills, wiki and connections are shared</td></tr>
+    <tr><td><b>Runtime</b></td><td>The shared stores opened once by <code>server.ts</code> or <code>cli.ts</code></td></tr>
+    <tr><td><b>Conversation</b></td><td>One chat bound to one model, its prompt, its tools and its review counters</td></tr>
+    <tr><td><b>Registry</b></td><td>The server's single active conversation and its starting/replying flags</td></tr>
+    <tr><td><b>Review</b></td><td>A background fork that learns from new messages with local learning tools only</td></tr>
+    <tr><td><b>Snapshot</b></td><td>The first SSE event: everything a tab needs to draw the chat</td></tr>
+    <tr><td><b>Emulator</b></td><td>A fake model, MCP server or Composio used by tests, with fake credentials</td></tr>
+  </table></div>
+</section>
+
+<footer>Built from the code at <code>e4657f1</code>. If the code and this page disagree, trust the code. Related: <code>docs/architecture.md</code>, <code>docs/glossary.md</code>, <code>docs/behaviors.md</code>.</footer>
+</main>
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var key = "pa-system-design-theme";
+  try { var saved = localStorage.getItem(key); if (saved) root.setAttribute("data-theme", saved); } catch (e) {}
+  document.getElementById("theme").addEventListener("click", function () {
+    var dark = root.getAttribute("data-theme")
+      ? root.getAttribute("data-theme") === "dark"
+      : window.matchMedia("(prefers-color-scheme: dark)").matches;
+    var next = dark ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem(key, next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>
